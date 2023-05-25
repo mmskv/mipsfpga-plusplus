@@ -1,0 +1,289 @@
+From 9b2a921ce0e5be7b736fa1961ea82ec1257fb305 Mon Sep 17 00:00:00 2001
+From: mmskv <max.mishuk2014@gmail.com>
+Date: Thu, 25 May 2023 20:34:31 +0300
+Subject: [PATCH] MIPS: Add support for mipsfpga-plusplus target on DE10-Lite
+ board
+
+This patch includes the necessary changes to allow the Linux kernel to boot on a DE10-Lite board with a custom MIPS target called mipsfpga-plusplus.
+
+Major changes:
+
+- Added a configuration option to include a Flattened Device Tree (FDT) for the DE10-Lite board into the FIT kernel image.
+- Provided a new device tree source for DE10-Lite with specifications for memory, interrupt-controller, and UART, among others.
+- Included microAptiv core details in the device tree, such as clock source and CPU configurations.
+- Added specific board configurations for mipsfpga-plusplus in board-mipsfpga-plusplus.config.
+- Included a new board script file board-de10lite.its.S to generate the FIT image.
+- Modified the initial platform setup to set count and compare registers for DE10-Lite.
+- Adjusted the maximum number of IRQs for DE10-Lite.
+---
+ arch/mips/boot/dts/Makefile                   |  1 +
+ arch/mips/boot/dts/de10lite/Makefile          |  4 ++
+ arch/mips/boot/dts/de10lite/de10lite.dts      | 37 +++++++++++
+ arch/mips/boot/dts/de10lite/microAptiv.dtsi   | 22 +++++++
+ .../generic/board-mipsfpga-plusplus.config    | 65 +++++++++++++++++++
+ arch/mips/generic/Kconfig                     |  6 ++
+ arch/mips/generic/Platform                    |  1 +
+ arch/mips/generic/board-de10lite.its.S        | 23 +++++++
+ arch/mips/generic/init.c                      |  5 ++
+ arch/mips/include/asm/mach-generic/irq.h      |  4 ++
+ 10 files changed, 168 insertions(+)
+ create mode 100644 arch/mips/boot/dts/de10lite/Makefile
+ create mode 100644 arch/mips/boot/dts/de10lite/de10lite.dts
+ create mode 100644 arch/mips/boot/dts/de10lite/microAptiv.dtsi
+ create mode 100644 arch/mips/configs/generic/board-mipsfpga-plusplus.config
+ create mode 100644 arch/mips/generic/board-de10lite.its.S
+
+diff --git a/arch/mips/boot/dts/Makefile b/arch/mips/boot/dts/Makefile
+index 928f38a79..35eb0058a 100644
+--- a/arch/mips/boot/dts/Makefile
++++ b/arch/mips/boot/dts/Makefile
+@@ -15,5 +15,6 @@ subdir-$(CONFIG_ATH79)			+= qca
+ subdir-$(CONFIG_RALINK)			+= ralink
+ subdir-$(CONFIG_MACH_REALTEK_RTL)	+= realtek
+ subdir-$(CONFIG_FIT_IMAGE_FDT_XILFPGA)	+= xilfpga
++subdir-$(CONFIG_FIT_IMAGE_FDT_DE10LITE)	+= de10lite
+ 
+ obj-$(CONFIG_BUILTIN_DTB)	:= $(addsuffix /, $(subdir-y))
+diff --git a/arch/mips/boot/dts/de10lite/Makefile b/arch/mips/boot/dts/de10lite/Makefile
+new file mode 100644
+index 000000000..13b844fe2
+--- /dev/null
++++ b/arch/mips/boot/dts/de10lite/Makefile
+@@ -0,0 +1,4 @@
++# SPDX-License-Identifier: GPL-2.0
++dtb-$(CONFIG_FIT_IMAGE_FDT_DE10LITE) += de10lite.dtb
++
++obj-$(CONFIG_BUILTIN_DTB)      += $(addsuffix .o, $(dtb-y))
+diff --git a/arch/mips/boot/dts/de10lite/de10lite.dts b/arch/mips/boot/dts/de10lite/de10lite.dts
+new file mode 100644
+index 000000000..26a549598
+--- /dev/null
++++ b/arch/mips/boot/dts/de10lite/de10lite.dts
+@@ -0,0 +1,37 @@
++/dts-v1/;
++
++#include "microAptiv.dtsi"
++
++/ {
++       compatible = "terasic,de10lite";
++
++       memory {
++               device_type = "memory";
++               reg = <0x0 0x04000000>;
++               reg-io-width = <4>;
++       };
++
++       cpuintc: interrupt-controller {
++               #address-cells = <0>;
++               #interrupt-cells = <1>;
++               interrupt-controller;
++               compatible = "mti,cpu-interrupt-controller";
++       };
++
++       uart: serial@b0400000 {
++               compatible = "ns16550a";
++               reg = <0xb0400000 0x10000>;
++
++               reg-shift = <2>;
++               reg-offset = <0x1000>;
++
++               clocks  = <&ext>;
++
++               interrupt-parent = <&cpuintc>;
++               interrupts = <0>;
++       };
++};
++
++&ext {
++       clock-frequency = <50000000>;
++};
+diff --git a/arch/mips/boot/dts/de10lite/microAptiv.dtsi b/arch/mips/boot/dts/de10lite/microAptiv.dtsi
+new file mode 100644
+index 000000000..87b2b1f9a
+--- /dev/null
++++ b/arch/mips/boot/dts/de10lite/microAptiv.dtsi
+@@ -0,0 +1,22 @@
++// SPDX-License-Identifier: GPL-2.0
++/ {
++	#address-cells = <1>;
++	#size-cells = <1>;
++	compatible = "img,xilfpga";
++
++	cpus {
++		#address-cells = <1>;
++		#size-cells = <0>;
++		cpu@0 {
++			device_type = "cpu";
++			compatible = "mips,m14Kc";
++			clocks	= <&ext>;
++			reg = <0>;
++		};
++	};
++
++	ext: ext {
++		compatible = "fixed-clock";
++		#clock-cells = <0>;
++	};
++};
+diff --git a/arch/mips/configs/generic/board-mipsfpga-plusplus.config b/arch/mips/configs/generic/board-mipsfpga-plusplus.config
+new file mode 100644
+index 000000000..e02d73b1d
+--- /dev/null
++++ b/arch/mips/configs/generic/board-mipsfpga-plusplus.config
+@@ -0,0 +1,65 @@
++# CPU and system configurations
++# require CONFIG_CPU_MIPS32_R2=y
++# require CONFIG_CPU_LITTLE_ENDIAN=y
++CONFIG_EMBEDDED=y
++CONFIG_PANIC_ON_OOPS=y
++CONFIG_FIT_IMAGE_FDT_DE10LITE=y
++
++# Boot configurations
++CONFIG_CMDLINE_BOOL=y
++CONFIG_CMDLINE="console=ttyS0,115200"
++CONFIG_XZ_DEC=y
++CONFIG_BLK_DEV_INITRD=y
++CONFIG_INITRAMFS_SOURCE="changeme"
++CONFIG_INITRAMFS_ROOT_UID=0
++CONFIG_INITRAMFS_ROOT_GID=0
++CONFIG_RD_GZIP=y
++
++# Serial configurations
++CONFIG_SERIAL_8250=y
++CONFIG_SERIAL_8250_CONSOLE=y
++CONFIG_SERIAL_OF_PLATFORM=y
++# CONFIG_UNIX98_PTYS is not set
++# CONFIG_LEGACY_PTYS is not set
++# CONFIG_SERIO is not set
++# CONFIG_VT_HW_CONSOLE_BINDING is not set
++
++# Memory and filesystem configurations
++CONFIG_SLAB=y
++CONFIG_DEVTMPFS=y
++CONFIG_DEVTMPFS_MOUNT=y
++CONFIG_INIT_STACK_NONE=y
++
++# Debug configurations
++CONFIG_DEBUG_INFO=y
++CONFIG_DEBUG_INFO_DWARF4=y
++CONFIG_GDB_SCRIPTS=y
++CONFIG_DEBUG_FS=y
++CONFIG_MEMTEST=y
++
++CONFIG_GCC_PLUGINS=n
++
++# Disabling unused stuff
++#
++# CONFIG_COMPACTION is not set
++# CONFIG_LOCALVERSION_AUTO is not set
++# CONFIG_VM_EVENT_COUNTERS is not set
++# CONFIG_COMPAT_BRK is not set
++# CONFIG_BLOCK is not set
++# CONFIG_SUSPEND is not set
++# CONFIG_UEVENT_HELPER is not set
++# CONFIG_STANDALONE is not set
++# CONFIG_PREVENT_FIRMWARE_BUILD is not set
++# CONFIG_ALLOW_DEV_COREDUMP is not set
++# CONFIG_INPUT_KEYBOARD is not set
++# CONFIG_INPUT_MOUSE is not set
++# CONFIG_HW_RANDOM is not set
++# CONFIG_HWMON is not set
++# CONFIG_USB_SUPPORT is not set
++# CONFIG_IOMMU_SUPPORT is not set
++# CONFIG_PROC_PAGE_MONITOR is not set
++# CONFIG_MISC_FILESYSTEMS is not set
++# CONFIG_SCHED_DEBUG is not set
++# CONFIG_FTRACE is not set
++# CONFIG_FUSE_FS is not set
++# CONFIG_NET is not set
+diff --git a/arch/mips/generic/Kconfig b/arch/mips/generic/Kconfig
+index 7dc5b3821..70f81b146 100644
+--- a/arch/mips/generic/Kconfig
++++ b/arch/mips/generic/Kconfig
+@@ -76,6 +76,12 @@ config FIT_IMAGE_FDT_XILFPGA
+ 	  Enable this to include the FDT for the MIPSfpga platform
+ 	  from Imagination Technologies in the FIT kernel image.
+ 
++config FIT_IMAGE_FDT_DE10LITE
++	bool "Include FDT for DE10-Lite"
++	help
++	  Enable this to include the FDT for the MIPSfpga++ platform
++	  in the FIT kernel image.
++
+ config FIT_IMAGE_FDT_OCELOT
+ 	bool "Include FDT for Microsemi Ocelot development platforms"
+ 	select SOC_VCOREIII
+diff --git a/arch/mips/generic/Platform b/arch/mips/generic/Platform
+index 0c03623f3..2aa12ffb1 100644
+--- a/arch/mips/generic/Platform
++++ b/arch/mips/generic/Platform
+@@ -24,3 +24,4 @@ its-$(CONFIG_FIT_IMAGE_FDT_JAGUAR2)	+= board-jaguar2.its.S
+ its-$(CONFIG_FIT_IMAGE_FDT_SERVAL)	+= board-serval.its.S
+ its-$(CONFIG_FIT_IMAGE_FDT_XILFPGA)	+= board-xilfpga.its.S
+ its-$(CONFIG_FIT_IMAGE_FDT_MARDUK)	+= board-marduk.its.S
++its-$(CONFIG_FIT_IMAGE_FDT_DE10LITE)	+= board-de10lite.its.S
+diff --git a/arch/mips/generic/board-de10lite.its.S b/arch/mips/generic/board-de10lite.its.S
+new file mode 100644
+index 000000000..d7d96e986
+--- /dev/null
++++ b/arch/mips/generic/board-de10lite.its.S
+@@ -0,0 +1,23 @@
++/ {
++	images {
++		fdt-mipsfpga-plusplus {
++			description = "MIPSfpga++ (mipsfpga-plusplus) DE10-Lite Device Tree";
++			data = /incbin/("boot/dts/de10lite/de10lite.dtb");
++			type = "flat_dt";
++			arch = "mips";
++			compression = "none";
++			hash {
++				algo = "sha1";
++			};
++		};
++	};
++
++	configurations {
++		conf-mipsfpga-plusplus {
++			description = "MIPSfpga++ Linux kernel";
++			kernel = "kernel";
++			fdt = "fdt-mipsfpga";
++		};
++	};
++};
++
+diff --git a/arch/mips/generic/init.c b/arch/mips/generic/init.c
+index 1d712eac1..1da9d7e5f 100644
+--- a/arch/mips/generic/init.c
++++ b/arch/mips/generic/init.c
+@@ -153,6 +153,11 @@ void __init plat_time_init(void)
+ 	struct device_node *np;
+ 	struct clk *clk;
+ 
++#ifdef CONFIG_FIT_IMAGE_FDT_DE10LITE
++       write_c0_count(0);
++       write_c0_compare(0xffff);
++#endif
++
+ 	of_clk_init(NULL);
+ 
+ 	if (!cpu_has_counter) {
+diff --git a/arch/mips/include/asm/mach-generic/irq.h b/arch/mips/include/asm/mach-generic/irq.h
+index 4249af4be..b5d947d1a 100644
+--- a/arch/mips/include/asm/mach-generic/irq.h
++++ b/arch/mips/include/asm/mach-generic/irq.h
+@@ -9,8 +9,12 @@
+ #define __ASM_MACH_GENERIC_IRQ_H
+ 
+ #ifndef NR_IRQS
++#ifdef CONFIG_FIT_IMAGE_FDT_DE10LITE
++#define NR_IRQS 8
++#else
+ #define NR_IRQS 256
+ #endif
++#endif
+ 
+ #ifdef CONFIG_I8259
+ #ifndef I8259A_IRQ_BASE
+-- 
+2.40.1
+
